@@ -11,152 +11,131 @@
 
 import os
 import time
-import traceback
 import random
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
-from playwright.sync_api import sync_playwright
+import asyncio
+import traceback
+from playwright.async_api import async_playwright
 
 # ==== 配置项 ====
 ROOT_DIR = os.getcwd()
-IMDB_ID_FILE = "data.txt"
-OUTPUT_DIR = "debug_results"
+IMDB_ID_FILE = "data_part2.txt"
+OUTPUT_DIR = r"/Users/ironmanjay/data"  # 修改为你的目标路径
 FAILED_FILE = "failed_ids.txt"
-TIMEOUT = 10000
 RETRY_COUNT = 2
-HEADLESS = True
-MAX_WORKERS = 4
+CONCURRENCY = 6  # 最大并发数
+TIMEOUT = 10000  # 页面加载超时
 
 # ==== 工具函数 ====
-def read_imdb_ids_from_file(filename="data.txt"):
+def read_imdb_ids_from_file(filename=IMDB_ID_FILE):
     filepath = os.path.join(ROOT_DIR, filename)
-    imdb_ids = []
     try:
-        with open(filepath, "r", encoding="utf-8") as file:
-            for line in file:
-                line = line.strip()
-                if line.startswith("tt") and len(line) >= 9:
-                    imdb_ids.append(line)
-        return imdb_ids
+        with open(filepath, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip().startswith("tt")]
     except Exception as e:
-        print(f"读取IMDb ID失败: {e}")
+        print(f"读取 IMDb ID 失败: {e}")
         return []
 
-def remove_id_from_file(imdb_id, filename="data.txt"):
+def remove_id_from_file(imdb_id, filename=IMDB_ID_FILE):
     filepath = os.path.join(ROOT_DIR, filename)
     try:
-        with open(filepath, "r", encoding="utf-8") as file:
-            lines = file.readlines()
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = f.readlines()
         new_lines = [line for line in lines if line.strip() != imdb_id]
-        with open(filepath, "w", encoding="utf-8") as file:
-            file.writelines(new_lines)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
     except Exception as e:
-        print(f"移除ID失败: {imdb_id} - {e}")
+        print(f"移除 ID 失败: {imdb_id} - {e}")
         traceback.print_exc()
 
-def save_html(page, imdb_id, output_dir):
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"{imdb_id}.html")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(page.content())
-    print(f"✅ [{imdb_id}] 已保存: {path}")
-
-def is_challenge_page(html):
+async def is_challenge_page(html: str):
     return "awswaf" in html.lower() or "challenge-container" in html.lower()
 
-def fetch_imdb_page(page, imdb_id):
+async def save_html(content: str, imdb_id: str, output_dir: str):
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"{imdb_id}.html")
+
+    def write_file():
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    await asyncio.to_thread(write_file)
+    print(f"✅ [{imdb_id}] 已保存: {path}")
+
+
+# ==== 抓取核心 ====
+async def fetch_one(playwright, semaphore, imdb_id):
     url = f"https://www.imdb.com/title/{imdb_id}/plotsummary/"
-    page.set_extra_http_headers({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.imdb.com/"
-    })
-
-    for attempt in range(1, RETRY_COUNT + 1):
+    async with semaphore:
         try:
-            page.goto(url, timeout=TIMEOUT)
-            page.wait_for_selector("#summaries", timeout=5000)
-            html = page.content()
-            if is_challenge_page(html):
-                page.reload(timeout=TIMEOUT)
-                html = page.content()
-                if is_challenge_page(html):
-                    raise Exception("仍为挑战页")
-            return True
-        except Exception as e:
-            print(f"❌ [{imdb_id}] 第{attempt}次失败: {e}")
-            if attempt < RETRY_COUNT:
-                wait = 2 + attempt * 2 + random.uniform(0.5, 1.5)
-                print(f"⏳ 等待 {wait:.1f}s 后重试...")
-                time.sleep(wait)
-    return False
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
+            await page.route("**/*", lambda route: route.abort() if route.request.resource_type in [
+                "image", "stylesheet", "font"] else route.continue_())
 
-# ==== 多线程共享Context执行逻辑 ====
-def fetch_all_parallel(imdb_ids, output_dir):
-    failed_ids = []
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-
-        # 禁用不必要的资源
-        context.route("**/*", lambda route, request:
-            route.abort() if request.resource_type in ["image", "font", "stylesheet"] else route.continue_()
-        )
-
-        lock = Lock()  # 控制日志或共享资源访问
-
-        def worker(index_imdbid):
-            index, imdb_id = index_imdbid
-            try:
-                with lock:
-                    print(f"📥 正在处理 {index + 1}/{len(imdb_ids)}: {imdb_id}")
-                page = context.new_page()
-                success = fetch_imdb_page(page, imdb_id)
-                if success:
-                    save_html(page, imdb_id, output_dir)
-                    remove_id_from_file(imdb_id)
-                else:
-                    failed_ids.append(imdb_id)
-            except Exception as e:
-                print(f"❌ 异常: {imdb_id} - {e}")
-                failed_ids.append(imdb_id)
-            finally:
+            for attempt in range(1, RETRY_COUNT + 1):
                 try:
-                    page.close()
-                except:
-                    pass
+                    await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    await page.wait_for_selector("#summaries", timeout=5000)
+                    html = await page.content()
+                    if await is_challenge_page(html):
+                        await page.reload(timeout=TIMEOUT)
+                        html = await page.content()
+                        if await is_challenge_page(html):
+                            raise Exception("仍为挑战页")
+                    await save_html(html, imdb_id, OUTPUT_DIR)
+                    remove_id_from_file(imdb_id)
+                    await context.close()
+                    await browser.close()
+                    return None
+                except Exception as e:
+                    print(f"❌ [{imdb_id}] 第{attempt}次失败: {e}")
+                    if attempt < RETRY_COUNT:
+                        wait = 2 + attempt * 2 + random.uniform(0.5, 1.5)
+                        print(f"⏳ 等待 {wait:.1f}s 后重试...")
+                        await asyncio.sleep(wait)
+            await context.close()
+            await browser.close()
+            return imdb_id
+        except Exception as e:
+            print(f"❌ [{imdb_id}] 爬取失败: {e}")
+            return imdb_id
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            executor.map(worker, enumerate(imdb_ids))
-
-        context.close()
-        browser.close()
-
-    return failed_ids
-
-# ==== 主函数 ====
-if __name__ == "__main__":
+# ==== 主执行函数 ====
+async def main():
     print("=" * 60)
-    print("🚀 IMDb 多线程爬虫启动")
+    print("🚀 IMDb 多协程爬虫启动")
     print("=" * 60)
 
-    imdb_ids = read_imdb_ids_from_file(IMDB_ID_FILE)
+    imdb_ids = read_imdb_ids_from_file()
     if not imdb_ids:
-        print("⚠️ 没有可处理的ID，程序退出")
-        exit()
+        print("⚠️ 没有可处理的 ID，退出")
+        return
 
     start = time.time()
-    failed = fetch_all_parallel(imdb_ids, OUTPUT_DIR)
+    failed_ids = []
+
+    semaphore = asyncio.Semaphore(CONCURRENCY)
+    async with async_playwright() as playwright:
+        tasks = [fetch_one(playwright, semaphore, imdb_id) for imdb_id in imdb_ids]
+        results = await asyncio.gather(*tasks)
+        failed_ids = [r for r in results if r]
 
     print("\n📊 总数: ", len(imdb_ids))
-    print("✅ 成功: ", len(imdb_ids) - len(failed))
-    print("❌ 失败: ", len(failed))
+    print("✅ 成功: ", len(imdb_ids) - len(failed_ids))
+    print("❌ 失败: ", len(failed_ids))
     print(f"⏱️ 总耗时: {int(time.time() - start)} 秒")
 
-    if failed:
+    if failed_ids:
         with open(FAILED_FILE, "w", encoding="utf-8") as f:
-            f.write("\n".join(failed))
-        print(f"\n📁 失败ID已写入: {FAILED_FILE}")
+            f.write("\n".join(failed_ids))
+        print(f"\n📁 失败ID已保存至: {FAILED_FILE}")
 
     input("\n🎉 完成！按Enter退出...")
+
+# ==== 启动 ====
+if __name__ == "__main__":
+    asyncio.run(main())
