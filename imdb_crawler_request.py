@@ -14,7 +14,9 @@ import time
 import traceback
 import random
 import requests
+import threading
 import concurrent.futures
+
 
 class IMDBCrawler:
     def __init__(self,
@@ -33,6 +35,7 @@ class IMDBCrawler:
         self.retry = retry
         self.max_workers = max_workers
         self.cookie_str = cookie_str
+        self.lock = threading.Lock()
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.1 Safari/605.1.15",
@@ -41,37 +44,34 @@ class IMDBCrawler:
 
     def read_ids(self):
         path = os.path.join(self.root_dir, self.imdb_file)
-        ids = []
         try:
             with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("tt") and len(line) >= 9:
-                        ids.append(line)
-            print(f"📖 成功读取 {len(ids)} 个IMDb ID")
+                ids = [line.strip() for line in f if line.strip().startswith("tt")]
+            print(f"📖 成功读取 {len(ids)} 个 IMDb ID")
             return ids
         except Exception as e:
-            print(f"❌ 读取IMDb ID失败: {e}")
+            print(f"❌ 读取 IMDb ID 失败: {e}")
             return []
 
     def remove_id(self, imdb_id):
         path = os.path.join(self.root_dir, self.imdb_file)
         try:
-            with open(path, "r", encoding="utf-8") as file:
-                lines = file.readlines()
-            new_lines = [line for line in lines if line.strip() != imdb_id]
-            with open(path, "w", encoding="utf-8") as file:
-                file.writelines(new_lines)
-            print(f"🗑️ 已移除已完成ID: {imdb_id}")
+            with self.lock:  # 加锁，确保同一时刻只有一个线程修改文件
+                with open(path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                new_lines = [line for line in lines if line.strip() != imdb_id]
+                with open(path, "w", encoding="utf-8") as f:
+                    f.writelines(new_lines)
+            print(f"🗑️ 已移除已完成 ID: {imdb_id}")
         except Exception as e:
-            print(f"❌ 移除ID失败: {imdb_id}, 原因: {e}")
+            print(f"❌ 移除 ID 失败: {imdb_id}, 原因: {e}")
 
     def save_html(self, html, imdb_id):
         os.makedirs(self.output_dir, exist_ok=True)
         path = os.path.join(self.output_dir, f"{imdb_id}.html")
         with open(path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"✅ [{imdb_id}] HTML保存成功")
+        print(f"✅ [{imdb_id}] HTML 保存成功")
 
     def is_challenge_page(self, html):
         lower = html.lower()
@@ -122,14 +122,15 @@ class IMDBCrawler:
 
     def run(self):
         print("=" * 60)
-        print("🚀 IMDb多线程爬虫启动")
+        print("🚀 IMDb 多线程爬虫启动")
         print("=" * 60)
         ids = self.read_ids()
         if not ids:
-            print("⚠️ 无可用ID，退出")
+            print("⚠️ 无可用 ID，退出")
             return
         start = time.time()
         failed = []
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = [executor.submit(self.worker, imdb_id) for imdb_id in ids]
             for future in concurrent.futures.as_completed(futures):
@@ -141,21 +142,23 @@ class IMDBCrawler:
         print("✅ 成功: ", len(ids) - len(failed))
         print("❌ 失败: ", len(failed))
         print(f"⏱️ 耗时: {int(time.time() - start)} 秒")
+
         if failed:
             with open(self.failed_file, "w", encoding="utf-8") as f:
                 f.write("\n".join(failed))
-            print(f"📁 失败ID已保存到: {self.failed_file}")
-        input("\n🎉 所有任务完成！按Enter退出...")
+            print(f"📁 失败 ID 已保存到: {self.failed_file}")
+
+        input("\n🎉 所有任务完成！按 Enter 退出...")
 
 
 if __name__ == "__main__":
     crawler = IMDBCrawler(
-        imdb_file="data.txt",
+        imdb_file="data_part1.txt",
         output_dir=r"D:\debug_results",
         failed_file="failed_ids.txt",
         timeout=15,
         retry=3,
-        max_workers=8,
+        max_workers=12,
         cookie_str="Atza|IwEBIMNFteiiyVjsJHpGqOhzM1PEZmU9gShL7_9gUBMZwB7K67tEMEGve4EQCeX-An2_vyoizO-PptAQhFAlsGlFEN7LXqHj0qLuObnOi1AuHe4sVxoCiOPDgJaDXa-CSlaa0R0WIINNZ6SNoyqWMr7IkvNTXNrQfbFvUziB9ckpy8MxFBHgQufYwOiF9_ZwsJClq1xidf8ipS9RUwONeF3jA31fbJ9KGPW2QNFN_qyXQy75qQ"
     )
     crawler.run()
