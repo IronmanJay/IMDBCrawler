@@ -146,11 +146,11 @@ class IMDBCrawler:
 
 if __name__ == "__main__":
     crawler = IMDBCrawler(
-        imdb_file="data_part2.txt",
+        imdb_file="data.txt",
         output_dir=r"D:\debug_results",
         failed_file="failed_ids.txt",
-        timeout=15,
-        retry=3,
+        timeout=30,
+        retry=5,
         max_workers=12,
         cookie_str="Atza|IwEBIMNFteiiyVjsJHpGqOhzM1PEZmU9gShL7_9gUBMZwB7K67tEMEGve4EQCeX-An2_vyoizO-PptAQhFAlsGlFEN7LXqHj0qLuObnOi1AuHe4sVxoCiOPDgJaDXa-CSlaa0R0WIINNZ6SNoyqWMr7IkvNTXNrQfbFvUziB9ckpy8MxFBHgQufYwOiF9_ZwsJClq1xidf8ipS9RUwONeF3jA31fbJ9KGPW2QNFN_qyXQy75qQ"
     )
