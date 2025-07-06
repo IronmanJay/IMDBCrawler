@@ -19,14 +19,7 @@ import concurrent.futures
 
 
 class IMDBCrawler:
-    def __init__(self,
-                 imdb_file="data.txt",
-                 output_dir=r"D:\debug_results",
-                 failed_file="failed_ids.txt",
-                 timeout=15,
-                 retry=3,
-                 max_workers=8,
-                 cookie_str="Atza|IwEBIMNFteiiyVjsJHpGqOhzM1PEZmU9gShL7_9gUBMZwB7K67tEMEGve4EQCeX-An2_vyoizO-PptAQhFAlsGlFEN7LXqHj0qLuObnOi1AuHe4sVxoCiOPDgJaDXa-CSlaa0R0WIINNZ6SNoyqWMr7IkvNTXNrQfbFvUziB9ckpy8MxFBHgQufYwOiF9_ZwsJClq1xidf8ipS9RUwONeF3jA31fbJ9KGPW2QNFN_qyXQy75qQ"):  # 请替换为你的真实cookie
+    def __init__(self, imdb_file, output_dir, failed_file, timeout, retry, max_workers, cookie_str):
         self.root_dir = os.getcwd()
         self.imdb_file = imdb_file
         self.output_dir = output_dir
@@ -153,7 +146,7 @@ class IMDBCrawler:
 
 if __name__ == "__main__":
     crawler = IMDBCrawler(
-        imdb_file="data_part1.txt",
+        imdb_file="data_part2.txt",
         output_dir=r"D:\debug_results",
         failed_file="failed_ids.txt",
         timeout=15,
