@@ -11,7 +11,6 @@
 
 import os
 import time
-import traceback
 import random
 import requests
 import threading
@@ -49,7 +48,8 @@ class IMDBCrawler:
     def remove_id(self, imdb_id):
         path = os.path.join(self.root_dir, self.imdb_file)
         try:
-            with self.lock:  # 加锁，确保同一时刻只有一个线程修改文件
+            # 加锁，确保同一时刻只有一个线程修改文件
+            with self.lock:
                 with open(path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
                 new_lines = [line for line in lines if line.strip() != imdb_id]

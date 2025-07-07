@@ -16,11 +16,9 @@ import tarfile
 from concurrent.futures import ThreadPoolExecutor
 import time
 import argparse
-import io
 from tqdm import tqdm
 import shutil
 import math
-
 
 
 class IMDbDataCleaner:
@@ -113,14 +111,12 @@ class HTMLArchiveCompressor:
                  keep_original=False, verbose=False):
         """
         初始化HTML归档压缩器
-
-        参数:
-            directory: 包含HTML文件的目录路径
-            output_file: 输出的压缩文件路径
-            compression_level: Zstd压缩级别(1-22, 默认3)
-            max_workers: 线程池大小(默认=CPU核心数×2)
-            keep_original: 是否保留原始HTML文件(默认False)
-            verbose: 是否显示详细输出(默认False)
+        :param directory: 包含HTML文件的目录路径
+        :param output_file: 输出的压缩文件路径
+        :param compression_level: Zstd压缩级别(1-22, 默认3)
+        :param max_workers: 线程池大小(默认=CPU核心数×2)
+        :param keep_original: 是否保留原始HTML文件(默认False)
+        :param verbose: 是否显示详细输出(默认False)
         """
         self.directory = directory
         self.output_file = output_file
@@ -138,12 +134,18 @@ class HTMLArchiveCompressor:
         self.start_time = None
 
     def _find_html_files(self):
-        """查找目录中的所有HTML文件"""
+        """
+        查找目录中的所有HTML文件
+        :return: 查找结果
+        """
         pattern = os.path.join(self.directory, '**/*.html')
         return glob.glob(pattern, recursive=True)
 
     def compress(self):
-        """将所有HTML文件压缩到单个压缩包"""
+        """
+        将所有HTML文件压缩到单个压缩包
+        :return: 压缩结果
+        """
         if not self.html_files:
             print("No HTML files found in the directory!")
             return False
@@ -155,7 +157,7 @@ class HTMLArchiveCompressor:
         print(f"Original files will {'be kept' if self.keep_original else 'be deleted'}")
 
         try:
-            # 创建输出目录（如果需要）
+            # 创建输出目录
             os.makedirs(os.path.dirname(self.output_file), exist_ok=True)
 
             # 使用Zstd压缩器
@@ -183,7 +185,7 @@ class HTMLArchiveCompressor:
                             self.processed_files += 1
                             progress_bar.update(1)
 
-                            # 删除原始文件（如果设置）
+                            # 删除原始文件
                             if not self.keep_original:
                                 os.remove(file_path)
 
@@ -206,11 +208,9 @@ class ZstdTarExtractor:
     def __init__(self, archive_path, extract_dir, verbose=False):
         """
         初始化Zstd Tar解压器
-
-        参数:
-            archive_path: .tar.zst压缩文件路径
-            extract_dir: 解压目标目录
-            verbose: 是否显示详细输出
+        :param archive_path: .tar.zst压缩文件路径
+        :param extract_dir: 解压目标目录
+        :param verbose: 是否显示详细输出
         """
         self.archive_path = archive_path
         self.extract_dir = extract_dir
@@ -221,7 +221,10 @@ class ZstdTarExtractor:
             raise FileNotFoundError(f"Archive file not found: {archive_path}")
 
     def extract(self):
-        """解压.tar.zst文件"""
+        """
+        解压.tar.zst文件
+        :return: 解压结果
+        """
         # 创建解压目录
         os.makedirs(self.extract_dir, exist_ok=True)
 
@@ -246,13 +249,13 @@ class ZstdTarExtractor:
 
                         # 提取所有文件
                         for member in tar:
-                            # 显示当前提取的文件（如果verbose）
+                            # 显示当前提取的文件
                             if self.verbose:
                                 print(f"Extracting: {member.name}")
 
                             tar.extract(member, self.extract_dir)
 
-                            # 更新进度条（基于已处理的数据量）
+                            # 更新进度条
                             pbar.update(f_in.tell() - pbar.n)
 
                         pbar.close()
@@ -268,23 +271,24 @@ class ZstdTarExtractor:
 class FastHTMLBatchSplitter:
     def __init__(self, source_dir, batch_size=20000, target_dir=None, workers=8):
         """
-        超高速HTML文件分批器
-
-        参数:
-            source_dir: 源目录路径
-            batch_size: 每批文件数 (默认20,000)
-            target_dir: 目标目录 (默认: source_dir/batches)
-            workers: 并行线程数 (默认8)
+        HTML文件分批器
+        :param source_dir: 源目录路径
+        :param batch_size: 每批文件数 (默认20,000)
+        :param target_dir: 目标目录 (默认: source_dir/batches)
+        :param workers: 并行线程数 (默认8)
         """
         self.source_dir = os.path.normpath(source_dir)
         self.batch_size = batch_size
         self.target_root = target_dir or os.path.join(source_dir, "batches")
         self.workers = workers
         self.file_chunks = []
-        self.processed_files = 0  # 新增：跟踪已处理文件数
+        self.processed_files = 0
 
     def _find_html_files(self):
-        """多线程快速扫描HTML文件"""
+        """
+        多线程快速扫描HTML文件
+        :return: 扫描结果
+        """
         print("🚀 正在加速扫描HTML文件...")
         all_files = []
 
@@ -298,7 +302,10 @@ class FastHTMLBatchSplitter:
         return all_files
 
     def _prepare_batches(self):
-        """预分配文件到批次"""
+        """
+        预分配文件到批次
+        :return: None
+        """
         total_files = len(self.html_files)
         num_batches = math.ceil(total_files / self.batch_size)
 
@@ -309,7 +316,13 @@ class FastHTMLBatchSplitter:
         ]
 
     def _process_batch(self, batch_num, files, pbar):
-        """处理单个批次 (线程安全)"""
+        """
+        处理单个批次
+        :param batch_num: 批次数
+        :param files: 目标文件
+        :param pbar: 进度条
+        :return: None
+        """
         batch_dir = os.path.join(self.target_root, f"batch_{batch_num + 1:03d}")
 
         for src_file in files:
@@ -318,13 +331,16 @@ class FastHTMLBatchSplitter:
                 dst_file = os.path.join(batch_dir, rel_path)
                 os.makedirs(os.path.dirname(dst_file), exist_ok=True)
                 shutil.move(src_file, dst_file)
-                if pbar:  # 新增：安全更新进度条
+                if pbar:
                     pbar.update(1)
             except Exception as e:
                 print(f"\n⚠️ 处理文件失败: {src_file} - {str(e)}")
 
     def split_into_batches(self):
-        """多线程分批处理"""
+        """
+        多线程分批处理
+        :return: 处理结果
+        """
         self.html_files = self._find_html_files()
 
         if not self.html_files:
@@ -359,21 +375,18 @@ if __name__ == "__main__":
     state = "splithtml"
 
     if state == "clean":
-        # Step 1: 清洗 data.txt
         cleaner = IMDbDataCleaner(
             data_file="data.txt",
             html_dir=r"D:\imdb_plots"
         )
         cleaner.run()
     elif state == "split":
-        # Step 2: 分割 data.txt
         splitter = IMDbDataSplitter(
             data_file="data.txt",
-            output_dir="."  # 当前目录
+            output_dir="."
         )
         splitter.run()
     elif state == "compressor":
-        # 设置命令行参数解析
         parser = argparse.ArgumentParser(description='HTML文件归档压缩工具')
         parser.add_argument('directory', type=str, help='包含HTML文件的目录路径')
         parser.add_argument('output', type=str, help='输出压缩文件路径')
@@ -405,7 +418,6 @@ if __name__ == "__main__":
         else:
             print("Compression failed.")
     if state == "decompressor":
-        # 设置命令行参数解析
         parser = argparse.ArgumentParser(description='Zstd Tar解压工具')
         parser.add_argument('archive', type=str, help='.tar.zst文件路径')
         parser.add_argument('output_dir', type=str, help='解压目标目录')
@@ -426,8 +438,8 @@ if __name__ == "__main__":
             print("解压成功！")
         else:
             print("解压失败，请检查错误信息。")
-    elif state=="splithtml":
-        parser = argparse.ArgumentParser(description='超高速HTML文件分批器')
+    elif state == "splithtml":
+        parser = argparse.ArgumentParser(description='HTML文件分批器')
         parser.add_argument('source_dir', help='源目录路径')
         parser.add_argument('--batch-size', type=int, default=20000, help='每批文件数')
         parser.add_argument('--target-dir', help='自定义目标目录')
